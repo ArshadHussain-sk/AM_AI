@@ -1,0 +1,23 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# User databases and keys
+am_ai.db
+jobs.json
+.env
+
+# Separated audio streams (uploads and outputs)
+uploads/
+outputs/
+
+# OS specific files
+.DS_Store
+Thumbs.db

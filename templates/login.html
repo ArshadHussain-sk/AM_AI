@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - AM AI</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .auth-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+        }
+        .auth-card {
+            width: 100%;
+            max-width: 420px;
+            padding: 40px;
+            border-radius: var(--radius-lg);
+            text-align: center;
+        }
+        .auth-header {
+            margin-bottom: 32px;
+        }
+        .auth-logo {
+            margin: 0 auto 16px auto;
+        }
+        .auth-title {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+        .auth-subtitle {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            text-align: left;
+        }
+        .auth-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            padding: 14px 16px;
+            border-radius: var(--radius-sm);
+            color: var(--text-main);
+            font-size: 0.95rem;
+            outline: none;
+            transition: var(--transition);
+        }
+        .auth-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.2);
+            transform: translateY(-1px);
+        }
+        .auth-error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            margin-bottom: 16px;
+            text-align: center;
+            animation: shake 0.4s ease-in-out;
+        }
+        .auth-footer {
+            margin-top: 24px;
+            font-size: 0.88rem;
+            color: var(--text-muted);
+        }
+        .auth-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        .auth-link:hover {
+            color: var(--text-main);
+            text-decoration: underline;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Glowing Spheres -->
+    <div class="glow-sphere glow-sphere-1"></div>
+    <div class="glow-sphere glow-sphere-2"></div>
+
+    <div class="auth-wrapper">
+        <div class="glass-card auth-card">
+            <div class="auth-header">
+                <div class="logo-icon-container auth-logo">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                </div>
+                <h2 class="auth-title">AM AI <span class="accent-text">Audio Lab</span></h2>
+                <p class="auth-subtitle">Log in to isolate vocals and instrumentals</p>
+            </div>
+
+            {% if error %}
+            <div class="auth-error">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form class="auth-form" action="/login" method="POST">
+                <div class="form-group">
+                    <label class="form-label" for="username">Username</label>
+                    <input class="auth-input" type="text" id="username" name="username" required autocomplete="username" placeholder="Enter username">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <input class="auth-input" type="password" id="password" name="password" required autocomplete="current-password" placeholder="Enter password">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block btn-large margin-top-small">
+                    Sign In
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                Don't have an account? <a href="/register" class="auth-link">Create Account</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AM AI - Premium AI Vocal & Instrument Separator</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <!-- Main Style -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Wavesurfer.js for Audio Waveform visualization -->
+    <script src="https://unpkg.com/wavesurfer.js@7"></script>
+</head>
+<body>
+    <!-- Top System Notifications -->
+    {% if not has_ffmpeg %}
+    <div class="top-banner warning-banner" id="ffmpeg-warning">
+        <div class="banner-content">
+            <svg class="banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span><strong>FFmpeg Not Found:</strong> Audio decoding/encoding for MP3, FLAC, M4A, and OGG will fail. Only native WAV files are supported. Please install FFmpeg (e.g. <code>winget install Gyan.FFmpeg</code>) and restart the application.</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Background decorative glows -->
+    <div class="glow-sphere glow-sphere-1"></div>
+    <div class="glow-sphere glow-sphere-2"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon-container">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 2v20M17 5v14M22 8v8M7 8v8M2 10v4"/>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <span class="logo-title">AM <span class="accent-text">AI</span></span>
+                    <span class="logo-subtitle">AUDIO LAB</span>
+                </div>
+            </div>
+            
+            <nav class="nav-links">
+                <span class="nav-user-greet">Hi, {{ username }}</span>
+                <a href="#" class="nav-link active" onclick="showSection('home')">Home</a>
+                <a href="#" class="nav-link" onclick="openAboutModal()">About</a>
+                <a href="{{ github_url }}" target="_blank" class="nav-link github-link">
+                    <svg viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
+                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    GitHub
+                </a>
+                <a href="/logout" class="nav-link logout-link">Logout</a>
+            </nav>
+
+            <div class="system-status">
+                <div class="status-badge {% if cuda_available %}status-gpu{% else %}status-cpu{% endif %}">
+                    <span class="status-dot"></span>
+                    <span class="status-label">
+                        {% if cuda_available %}GPU (CUDA) Active{% else %}CPU Processing Mode{% endif %}
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="app-main">
+            
+            <!-- SECTION 1: UPLOAD AREA -->
+            <section id="section-upload" class="workspace-section active">
+                <div class="hero-block">
+                    <h1 class="hero-title">AI Vocal & Instrument Separator</h1>
+                    <p class="hero-subtitle">Extract high-fidelity vocals, instrumentals, drums, and bass from any audio track in seconds using state-of-the-art AI.</p>
+                </div>
+
+                <div class="glass-card upload-card" id="drop-zone">
+                    <input type="file" id="file-input" accept=".mp3,.wav,.flac,.m4a,.ogg" style="display: none;">
+                    
+                    <div class="upload-icon-wrapper">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                    </div>
+                    
+                    <h3 class="upload-card-title">Drag & drop your audio track here</h3>
+                    <p class="upload-card-description">or click to browse your local files</p>
+                    
+                    <button class="btn btn-primary btn-upload" onclick="document.getElementById('file-input').click()">
+                        Select Audio File
+                    </button>
+                    
+                    <div class="upload-formats">
+                        <span>Supported formats: MP3, WAV, FLAC, M4A, OGG</span>
+                        <span>Maximum file size: 500 MB</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: AUDIO PREVIEW & CONFIGURATION -->
+            <section id="section-preview" class="workspace-section">
+                <div class="section-header-back">
+                    <button class="btn-back" onclick="resetToUpload()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                        Change Track
+                    </button>
+                    <h2 class="section-title">Configure Separation</h2>
+                </div>
+
+                <div class="glass-card audio-info-card">
+                    <div class="audio-meta">
+                        <div class="audio-details">
+                            <span class="file-name" id="preview-filename">song.mp3</span>
+                            <div class="meta-badges">
+                                <span class="meta-badge" id="preview-duration">0:00</span>
+                                <span class="meta-badge" id="preview-size">0.0 MB</span>
+                                <span class="meta-badge uppercase" id="preview-format">MP3</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Original Audio Waveform Preview -->
+                    <div class="waveform-container">
+                        <div class="waveform-label">Original Track Preview</div>
+                        <div id="original-waveform-preview" class="wavesurfer-waveform"></div>
+                        <div class="waveform-controls">
+                            <button class="btn-play-pause" id="btn-play-original" onclick="togglePlayOriginal()">
+                                <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                                <svg class="pause-icon hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                            </button>
+                            <span class="time-display" id="time-original">00:00 / 00:00</span>
+                            <div class="volume-control">
+                                <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                </svg>
+                                <input type="range" class="volume-slider" id="original-volume" min="0" max="1" step="0.05" value="0.8">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-grid">
+                    <!-- Separation Modes -->
+                    <div class="glass-card config-card">
+                        <h3 class="card-title">Separation Mode</h3>
+                        <div class="radio-group">
+                            <label class="radio-label active">
+                                <input type="radio" name="separate-mode" value="2stems" checked onclick="updateModeUI('2stems')">
+                                <span class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-header">Vocals & Instrumental (2 Stems)</span>
+                                    <span class="radio-desc">Separate into vocal track and full background instrumentation. Fast processing.</span>
+                                </div>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="separate-mode" value="4stems" onclick="updateModeUI('4stems')">
+                                <span class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-header">Vocals, Drums, Bass & Other (4 Stems)</span>
+                                    <span class="radio-desc">Deconstruct into separate vocals, drums, bass, and remaining instrumentation. Requires more processing power.</span>
+                                </div>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="separate-mode" value="6stems" onclick="updateModeUI('6stems')">
+                                <span class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-header">Vocals, Drums, Bass, Piano, Guitar & Other (6 Stems)</span>
+                                    <span class="radio-desc">Deconstruct into vocals, drums, bass, guitar, piano, and other stems. Leverages the 6-stem model.</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Processing Engine Settings -->
+                    <div class="glass-card config-card">
+                        <h3 class="card-title">Processing Settings</h3>
+                        
+                        <div class="form-group">
+                            <label class="form-label" for="select-model">Model Quality Engine</label>
+                            <select class="form-select" id="select-model" onchange="updateModelDescription()">
+                                <option value="htdemucs" selected>HTDemucs (Default, Fast & Balanced)</option>
+                                <option value="htdemucs_ft">🎧 HTDemucs FT (Fine-tuned, High Fidelity)</option>
+                                <option value="mdx_extra">🎧 MDX-Net Extra (Premium Vocals/Instrumental)</option>
+                                <option value="htdemucs_6s">HTDemucs 6S (6 Stems isolation)</option>
+                            </select>
+                            <span class="form-help" id="model-help-text">Standard Hybrid Transformer Demucs. Fast and balanced separation.</span>
+                        </div>
+
+                        <div class="form-group margin-top-medium">
+                            <label class="form-label" for="select-device">Execution Hardware Device</label>
+                            <select class="form-select" id="select-device">
+                                <option value="auto">Auto-Detect Device (Recommended)</option>
+                                <option value="cuda">Force GPU (CUDA Acceleration)</option>
+                                <option value="cpu">Force CPU (Slower, stable)</option>
+                            </select>
+                            <span class="form-help">Auto-detect leverages your NVIDIA RTX 4050 GPU for ultra-fast processing if PyTorch CUDA is compatible.</span>
+                        </div>
+
+                        <div class="form-group margin-top-medium">
+                            <label class="form-label">Audio Quality & Post-Processing</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="check-normalize" checked>
+                                    <span class="checkbox-custom"></span>
+                                    <div class="checkbox-content">
+                                        <span class="checkbox-header">Smart Normalization</span>
+                                        <span class="checkbox-desc">Boosts audio levels to optimal volume (-1dB) without distortion.</span>
+                                    </div>
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="check-noise-gate">
+                                    <span class="checkbox-custom"></span>
+                                    <div class="checkbox-content">
+                                        <span class="checkbox-header">Adaptive Noise Gate</span>
+                                        <span class="checkbox-desc">Intelligently silences background hiss and leakages during quiet gaps.</span>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group margin-top-large">
+                            <button class="btn btn-primary btn-large btn-glow btn-block" id="btn-start-separation" onclick="startSeparation()">
+                                <svg viewBox="0 0 24 24" class="svg-icon-large" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                                Begin AI Separation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: PROCESSING SCREEN -->
+            <section id="section-processing" class="workspace-section">
+                <div class="processing-wrapper">
+                    <div class="glass-card processing-card">
+                        <!-- Spinning record style visualizer -->
+                        <div class="vinyl-spinner-wrapper">
+                            <div class="vinyl-spinner">
+                                <div class="vinyl-center"></div>
+                            </div>
+                        </div>
+
+                        <h2 class="processing-title">AI Processing in Progress</h2>
+                        <p class="processing-subtitle" id="processing-status-text">Demucs is analyzing and separating your tracks...</p>
+                        
+                        <!-- Progress Bar -->
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="processing-progress-fill" style="width: 0%"></div>
+                            <span class="progress-percent" id="processing-progress-text">0%</span>
+                        </div>
+
+                        <!-- Progress Steps Checklist -->
+                        <div class="progress-steps">
+                            <div class="progress-step active" id="step-upload">
+                                <span class="step-icon">✓</span>
+                                <span class="step-name">Uploading Audio</span>
+                            </div>
+                            <div class="progress-step" id="step-queue">
+                                <span class="step-icon">⋯</span>
+                                <span class="step-name">Waiting in Queue</span>
+                            </div>
+                            <div class="progress-step" id="step-model">
+                                <span class="step-icon">⋯</span>
+                                <span class="step-name">Loading AI Models</span>
+                            </div>
+                            <div class="progress-step" id="step-separate">
+                                <span class="step-icon">⋯</span>
+                                <span class="step-name">Separating Audio Stems</span>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic AI Engine Insight Panel (Replaces Boring Timers) -->
+                        <div class="insight-box glass-card">
+                            <div class="insight-icon">
+                                <span class="pulse-ring"></span>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5v14M22 9v6M7 8v8M2 10v4"/></svg>
+                            </div>
+                            <div class="insight-content">
+                                <span class="insight-label">AI Engine Activity</span>
+                                <span class="insight-text" id="processing-insight">Initializing neural layers...</span>
+                            </div>
+                        </div>
+
+                        <div class="warning-box hidden" id="processing-queue-warning">
+                            <span class="warning-icon">ℹ</span>
+                            <span class="warning-text">Another separation job is running. Your job is queued and will start automatically when ready.</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 4: SEPARATION RESULTS -->
+            <section id="section-results" class="workspace-section">
+                <div class="section-header-back">
+                    <button class="btn-back" onclick="resetToUpload()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                        Separate Another Track
+                    </button>
+                    <h2 class="section-title">Separation Results</h2>
+                    <button class="btn btn-secondary btn-zip-download" id="btn-download-all" onclick="downloadAllStems()">
+                        <svg viewBox="0 0 24 24" class="svg-icon" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                        Download All (ZIP)
+                    </button>
+                </div>
+
+                <!-- Results list dynamically loaded by JS -->
+                <div class="results-list" id="results-stems-container">
+                    <!-- Stem players will be injected here by main.js -->
+                </div>
+            </section>
+
+            <!-- RECENT HISTORY PANEL -->
+            <section id="section-history" class="glass-card history-card">
+                <div class="history-header">
+                    <h3 class="history-title">Recent Separation History</h3>
+                    <button class="btn-clear-history" onclick="clearHistory()">Clear History</button>
+                </div>
+                <div class="history-list" id="history-items-container">
+                    <!-- History items will be injected here -->
+                    <div class="no-history">No recent operations. Drag a file above to begin!</div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>© 2026 AM AI Labs. Powered by Meta Demucs neural networks. Built with PyTorch and FastAPI.</p>
+        </footer>
+    </div>
+
+    <!-- ABOUT MODAL -->
+    <div class="modal-overlay" id="about-modal">
+        <div class="glass-card modal-card">
+            <div class="modal-header">
+                <h3 class="modal-title">About AM AI Audio Lab</h3>
+                <button class="btn-modal-close" onclick="closeAboutModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h4>Developer & Creator</h4>
+                <p>AM AI Audio Lab is created and maintained by **Arshad Hussain**. You can study and follow his projects directly on his <a href="{{ github_url }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none;">GitHub Profile (@ArshadHussain-sk)</a>.</p>
+
+                <h4>Core Separator Neural Engine</h4>
+                <p>This web application utilizes **Meta's Demucs v4 (Hybrid Transformer Demucs)**. Demucs separates music tracks by employing convolutional encoders/decoders coupled with a transformer layer to process waveform and spectrogram representation models concurrently, achieving state-of-the-art separation fidelity.</p>
+
+                <h4>Hardware Configurations</h4>
+                <ul>
+                    <li><strong>AI Model:</strong> Meta Demucs (htdemucs) pretrained models.</li>
+                    <li><strong>Device Auto-Detect:</strong> Detects if PyTorch can interface with an NVIDIA GPU (via CUDA) or Apple Silicon (via MPS).</li>
+                    <li><strong>CUDA Acceleration:</strong> Offloads matrix arithmetic to your GPU cores, executing audio separation up to 10x faster than CPU modes.</li>
+                    <li><strong>FFmpeg Support:</strong> Essential for processing compressed audio containers (.mp3, .flac, .ogg, .m4a) to output clean files.</li>
+                </ul>
+
+                <h4>Development Tech Stack</h4>
+                <p>FastAPI backend with a sequential Python multi-threaded queue that handles jobs safely, coupled with custom Vanilla HTML/CSS/JS frontend logic and <code>Wavesurfer.js</code> for dynamic canvas-based waveform previews.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAboutModal()">Close Details</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div class="toast-container" id="toast-container"></div>
+    
+    <!-- Main JavaScript Logic -->
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
