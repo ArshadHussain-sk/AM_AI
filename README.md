@@ -44,6 +44,19 @@ flowchart TD
 
 ---
 
+## 🎚️ Live Studio Mixer & Multi-Stem DAW Features
+
+Global Release v1.0 elevates AM AI from a stem separator into a full in-browser digital audio workstation (DAW):
+
+*   **Synchronized Multi-Track Engine**: Stems play in sample-accurate phase lock with master play/pause controls.
+*   **Solo [S] & Mute [M] Controls**: Isolate single elements (e.g., pure vocals) or silence specific channels for instant karaoke backing tracks or drumless practice tracks.
+*   **A/B Real-Time Comparison Switch**: Instantly toggle between the raw uploaded song and the isolated stems mix at the exact millisecond playhead position.
+*   **Variable Speed Controller**: Shift playback speeds smoothly (`0.75x`, `1.0x`, `1.25x`, `1.5x`) for learning fast riffs or transcribing intricate solos.
+*   **Active Equalizer Visualizers**: Real-time CSS-animated frequency spectrum bars provide instant feedback for active stems.
+*   **First-Time User Interactive Tour**: A 4-step glassmorphic onboarding walkthrough guides new users through models, mixer controls, and export settings.
+
+---
+
 ## 🎛️ DSP & Audio Engineering Pipeline
 
 Separated neural network stems often suffer from bleed-through noise, low gain outputs, or digital artifacts. AM AI runs a post-processing pipeline to refine output quality:

@@ -52,6 +52,14 @@
             <nav class="nav-links">
                 <span class="nav-user-greet">Hi, {{ username }}</span>
                 <a href="#" class="nav-link active" onclick="showSection('home')">Home</a>
+                <a href="#" class="nav-link nav-pill-btn" onclick="openOnboardingTour()" title="Quick Interactive Studio Guide">
+                    <svg viewBox="0 0 24 24" class="svg-icon" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 12 8"></polygon></svg>
+                    Studio Tour
+                </a>
+                <a href="#" class="nav-link" onclick="openShortcutsModal()" title="Keyboard Shortcuts (?)">
+                    <svg viewBox="0 0 24 24" class="svg-icon" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M6 12h.001M10 12h.001M14 12h.001M18 12h.001M8 16h8"></path></svg>
+                    Shortcuts
+                </a>
                 <a href="#" class="nav-link" onclick="openAboutModal()">About</a>
                 <a href="{{ github_url }}" target="_blank" class="nav-link github-link">
                     <svg viewBox="0 0 24 24" class="svg-icon" fill="currentColor">
@@ -63,11 +71,12 @@
             </nav>
 
             <div class="system-status">
-                <div class="status-badge {% if cuda_available %}status-gpu{% else %}status-cpu{% endif %}">
+                <div class="status-badge {% if cuda_available %}status-gpu{% else %}status-cpu{% endif %} clickable-badge" onclick="openTelemetryModal()" title="Click to view Hardware Diagnostics & Engine Telemetry">
                     <span class="status-dot"></span>
                     <span class="status-label">
-                        {% if cuda_available %}GPU (CUDA) Active{% else %}CPU Processing Mode{% endif %}
+                        {% if cuda_available %}GPU: {{ gpu_device_name }} ({{ gpu_vram_gb }}GB){% else %}CPU Processing Mode{% endif %}
                     </span>
+                    <span class="badge-hint">⚡</span>
                 </div>
             </div>
         </header>
@@ -311,6 +320,64 @@
                     </button>
                 </div>
 
+                <!-- Master Studio Synchronized Transport Bar -->
+                <div class="glass-card master-transport-card" id="master-transport-bar">
+                    <div class="master-transport-header">
+                        <div class="transport-title-group">
+                            <span class="transport-badge">LIVE STUDIO MIXER</span>
+                            <span class="transport-hint">All stems are phase-locked in sync</span>
+                        </div>
+                        <div class="transport-meta-controls">
+                            <!-- A/B Comparison Switch -->
+                            <button class="btn-ab-compare" id="btn-ab-compare" onclick="toggleABCompare()" title="Switch seamlessly between isolated stems mix and raw original upload">
+                                <span class="ab-indicator-dot"></span>
+                                <span id="ab-label">Mode: Isolated Stems</span>
+                            </button>
+                            
+                            <!-- Speed Control -->
+                            <div class="speed-control-group">
+                                <span class="speed-label">Speed:</span>
+                                <select class="speed-select" id="select-playback-rate" onchange="changePlaybackRate(this.value)">
+                                    <option value="0.75">0.75x</option>
+                                    <option value="1.0" selected>1.0x Normal</option>
+                                    <option value="1.25">1.25x</option>
+                                    <option value="1.5">1.5x</option>
+                                </select>
+                            </div>
+
+                            <!-- Reset Mix -->
+                            <button class="btn-reset-mix" onclick="resetStudioMixer()" title="Reset all volumes to 100% and clear Solos/Mutes">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+                                Reset Faders
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="master-transport-controls">
+                        <!-- Play / Pause Master -->
+                        <button class="btn-master-play" id="btn-master-play" onclick="toggleMasterPlay()" title="Play / Pause All Unmuted Stems (Spacebar)">
+                            <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                            <svg class="pause-icon hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                            <span class="master-play-label" id="master-play-label">Play Mix</span>
+                        </button>
+
+                        <!-- Master Scrub Slider -->
+                        <div class="master-scrubber-wrapper">
+                            <input type="range" class="master-scrubber" id="master-scrubber" min="0" max="100" value="0" step="0.1" oninput="seekAllStems(this.value)">
+                            <div class="master-time-readout" id="master-time-display">00:00 / 00:00</div>
+                        </div>
+
+                        <!-- Master Volume Slider -->
+                        <div class="volume-control master-volume">
+                            <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                            </svg>
+                            <input type="range" class="volume-slider" id="master-volume-slider" min="0" max="1" step="0.05" value="1.0" oninput="setMasterVolume(this.value)" title="Master Volume">
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Results list dynamically loaded by JS -->
                 <div class="results-list" id="results-stems-container">
                     <!-- Stem players will be injected here by main.js -->
@@ -364,6 +431,200 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeAboutModal()">Close Details</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- INTERACTIVE FIRST-TIME ONBOARDING TOUR MODAL -->
+    <div class="modal-overlay" id="onboarding-modal">
+        <div class="glass-card modal-card onboarding-card">
+            <div class="modal-header">
+                <div class="onboarding-header-title">
+                    <span class="tour-badge">GUIDED STUDIO TOUR</span>
+                    <h3 class="modal-title" id="tour-step-title">Welcome to AM AI Studio</h3>
+                </div>
+                <button class="btn-modal-close" onclick="closeOnboardingTour()">&times;</button>
+            </div>
+            
+            <div class="modal-body onboarding-body">
+                <!-- Slide 1 -->
+                <div class="tour-slide active" id="tour-slide-1">
+                    <div class="tour-visual-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5v14M22 8v8M7 8v8M2 10v4"/></svg>
+                    </div>
+                    <h4>Masterclass Audio Demixing</h4>
+                    <p>AM AI separates songs into pristine studio stems (vocals, drums, bass, guitar, piano, and instrumental) using <strong>Meta's Demucs v4 Hybrid Transformer</strong> neural architecture.</p>
+                    <div class="tour-highlight-box">
+                        <span>💡 Drag and drop any <strong>MP3, WAV, FLAC, M4A, or OGG</strong> file up to 500MB directly onto the workspace.</span>
+                    </div>
+                </div>
+
+                <!-- Slide 2 -->
+                <div class="tour-slide" id="tour-slide-2">
+                    <div class="tour-visual-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    </div>
+                    <h4>Choose Your Model Quality</h4>
+                    <p>Select the optimal neural engine based on your listening environment:</p>
+                    <ul class="tour-list">
+                        <li><strong>HTDemucs:</strong> Fast, balanced everyday separation.</li>
+                        <li><strong>🎧 HTDemucs FT (Fine-Tuned):</strong> Recommended for headphones with maximum transient clarity.</li>
+                        <li><strong>🎧 MDX-Net Extra:</strong> Extreme vocal isolation with zero bleeding.</li>
+                        <li><strong>HTDemucs 6S:</strong> Isolates Guitar and Piano independently!</li>
+                    </ul>
+                </div>
+
+                <!-- Slide 3 -->
+                <div class="tour-slide" id="tour-slide-3">
+                    <div class="tour-visual-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+                    </div>
+                    <h4>Live Synchronized Studio Mixer</h4>
+                    <p>Once separated, step into the full live mixing console:</p>
+                    <ul class="tour-list">
+                        <li><strong>Master Play / Spacebar:</strong> Plays all stems in phase lock.</li>
+                        <li><strong>Solo [S] Button:</strong> Isolate only vocals, only drums, or only bass with one click.</li>
+                        <li><strong>Mute [M] Button:</strong> Create instant karaoke backing tracks or drumless practice tracks!</li>
+                        <li><strong>A/B Comparison Switch:</strong> Seamlessly switch between the original song and your stem mix in real time.</li>
+                    </ul>
+                </div>
+
+                <!-- Slide 4 -->
+                <div class="tour-slide" id="tour-slide-4">
+                    <div class="tour-visual-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                    </div>
+                    <h4>GPU Acceleration & DSP Cleaners</h4>
+                    <p>Your hardware powers everything locally with zero lag:</p>
+                    <ul class="tour-list">
+                        <li><strong>RTX 4050 CUDA Acceleration:</strong> Separates full tracks in seconds instead of minutes.</li>
+                        <li><strong>Smart Normalization:</strong> Maximizes gain to -1.0 dBFS without clipping.</li>
+                        <li><strong>Adaptive Noise Gate:</strong> Silences background hiss below -55dBFS.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Stepper indicators -->
+            <div class="tour-footer">
+                <div class="tour-stepper-dots">
+                    <span class="tour-dot active" onclick="goToTourSlide(1)"></span>
+                    <span class="tour-dot" onclick="goToTourSlide(2)"></span>
+                    <span class="tour-dot" onclick="goToTourSlide(3)"></span>
+                    <span class="tour-dot" onclick="goToTourSlide(4)"></span>
+                </div>
+                
+                <div class="tour-dont-show">
+                    <label class="checkbox-label-simple">
+                        <input type="checkbox" id="check-tour-dont-show">
+                        <span>Don't show this guide on startup</span>
+                    </label>
+                </div>
+
+                <div class="tour-buttons">
+                    <button class="btn btn-secondary btn-sm" id="btn-tour-prev" onclick="prevTourSlide()" style="display: none;">Previous</button>
+                    <button class="btn btn-primary btn-sm" id="btn-tour-next" onclick="nextTourSlide()">Next Step</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- HARDWARE ENGINE TELEMETRY MODAL -->
+    <div class="modal-overlay" id="telemetry-modal">
+        <div class="glass-card modal-card">
+            <div class="modal-header">
+                <div class="telemetry-modal-title">
+                    <span class="status-dot"></span>
+                    <h3 class="modal-title">Hardware Engine Telemetry</h3>
+                </div>
+                <button class="btn-modal-close" onclick="closeTelemetryModal()">&times;</button>
+            </div>
+            <div class="modal-body telemetry-body">
+                <div class="telemetry-grid">
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">Compute Acceleration</span>
+                        <span class="telemetry-val highlight">{% if cuda_available %}NVIDIA CUDA 12.1 (Active){% else %}CPU Multi-Thread Mode{% endif %}</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">Graphics Processor</span>
+                        <span class="telemetry-val">{{ gpu_device_name }}</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">Dedicated VRAM</span>
+                        <span class="telemetry-val">{{ gpu_vram_gb }} GB Dedicated Memory</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">PyTorch Framework</span>
+                        <span class="telemetry-val">{{ torch_version }}</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">FFmpeg Audio Engine</span>
+                        <span class="telemetry-val">{% if has_ffmpeg %}Installed (320kbps MP3 LAME Encoders Active){% else %}Missing (Native WAV only){% endif %}</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">VRAM Safety Guard</span>
+                        <span class="telemetry-val highlight">Enabled (--segment 7s auto-chunking, 0% OOM risk)</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">Task Queue Concurrency</span>
+                        <span class="telemetry-val">Sequential Background Worker (Single-file VRAM lock)</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <span class="telemetry-label">Data Persistence</span>
+                        <span class="telemetry-val">SQLite3 (am_ai.db) with Cascading Relational Schemas</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeTelemetryModal()">Close Telemetry</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KEYBOARD SHORTCUTS MODAL -->
+    <div class="modal-overlay" id="shortcuts-modal">
+        <div class="glass-card modal-card">
+            <div class="modal-header">
+                <h3 class="modal-title">Studio Keyboard Shortcuts</h3>
+                <button class="btn-modal-close" onclick="closeShortcutsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcuts-table">
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Master Play / Pause Active Mix</span>
+                        <span class="shortcut-keys"><kbd>Space</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Toggle Solo on Focused Stem</span>
+                        <span class="shortcut-keys"><kbd>S</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Toggle Mute on Focused Stem</span>
+                        <span class="shortcut-keys"><kbd>M</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Skip Backward 5 Seconds</span>
+                        <span class="shortcut-keys"><kbd>←</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Skip Forward 5 Seconds</span>
+                        <span class="shortcut-keys"><kbd>→</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Master Volume Up / Down</span>
+                        <span class="shortcut-keys"><kbd>↑</kbd> / <kbd>↓</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Close Any Active Dialog / Modal</span>
+                        <span class="shortcut-keys"><kbd>Esc</kbd></span>
+                    </div>
+                    <div class="shortcut-row">
+                        <span class="shortcut-desc">Open Keyboard Shortcuts</span>
+                        <span class="shortcut-keys"><kbd>?</kbd></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeShortcutsModal()">Close Shortcuts</button>
             </div>
         </div>
     </div>

@@ -6,6 +6,11 @@ let originalWavesurfer = null;
 let wavesurferInstances = {};
 let pollingInterval = null;
 let currentPlayingInstance = null; // Track which audio player is currently playing
+let masterPlaying = false;
+let stemStates = {}; // stemName: { muted: false, soloed: false, volume: 1.0 }
+let isABComparing = false;
+let currentTourSlide = 1;
+let currentJobData = null;
 
 // UI section mapping
 const sections = {
@@ -20,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupDragAndDrop();
     loadHistoryList();
     setupGlobalShortcuts();
+    checkFirstTimeUserTour();
 });
 
 // 1. Drag & Drop File Upload Handling
@@ -345,9 +351,10 @@ async function pollJobStatus() {
     }
 }
 
-// 7. Results Renderer & Player setup
+// 7. Results Renderer & Studio Mixer Engine
 function displayResults(jobData) {
     showSection('results');
+    currentJobData = jobData;
 
     const container = document.getElementById('results-stems-container');
     container.innerHTML = ''; // Clear existing
@@ -357,6 +364,20 @@ function displayResults(jobData) {
         if (ws) ws.destroy();
     });
     wavesurferInstances = {};
+    stemStates = {};
+    masterPlaying = false;
+    isABComparing = false;
+
+    // Reset Master Transport Controls
+    updateMasterPlayButton(false);
+    const abBtn = document.getElementById('btn-ab-compare');
+    if (abBtn) abBtn.classList.remove('active-original');
+    const abLabel = document.getElementById('ab-label');
+    if (abLabel) abLabel.textContent = 'Mode: Isolated Stems';
+    const scrubber = document.getElementById('master-scrubber');
+    if (scrubber) scrubber.value = 0;
+    const masterTime = document.getElementById('master-time-display');
+    if (masterTime) masterTime.textContent = '00:00 / 00:00';
 
     const stems = jobData.stems;
     const mode = jobData.mode;
@@ -379,14 +400,35 @@ function displayResults(jobData) {
         const audioUrl = stems[stemName];
         const cfg = colors[stemName] || { wave: '#818cf8', progress: '#c084fc', badge: stemName };
 
+        // Initialize state for this stem
+        stemStates[stemName] = {
+            muted: false,
+            soloed: false,
+            volume: 1.0
+        };
+
         const card = document.createElement('div');
         card.className = 'stem-player-card';
+        card.id = `stem-card-${stemName}`;
         card.innerHTML = `
             <div class="stem-player-header">
                 <div class="stem-title-wrapper">
+                    <div class="eq-bars" id="eq-bars-${stemName}">
+                        <span class="eq-bar"></span>
+                        <span class="eq-bar"></span>
+                        <span class="eq-bar"></span>
+                        <span class="eq-bar"></span>
+                    </div>
                     <span class="stem-badge" style="background: ${cfg.progress}">${cfg.badge}</span>
                     <span class="stem-title">${jobData.filename} (${cfg.badge})</span>
                 </div>
+                
+                <!-- Solo and Mute DAW Controls -->
+                <div class="stem-quick-controls">
+                    <button class="btn-solo" id="btn-solo-${stemName}" onclick="toggleSolo('${stemName}')" title="Solo this track (S)">S</button>
+                    <button class="btn-mute" id="btn-mute-${stemName}" onclick="toggleMute('${stemName}')" title="Mute this track (M)">M</button>
+                </div>
+
                 <div class="stem-player-actions">
                     <button class="btn-icon" onclick="copyDownloadLink('${stemName}', '${jobData.job_id}')" title="Copy Stream Link">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
@@ -399,7 +441,7 @@ function displayResults(jobData) {
             <div class="waveform-container">
                 <div id="waveform-${stemName}" class="wavesurfer-waveform"></div>
                 <div class="waveform-controls">
-                    <button class="btn-play-pause" id="btn-play-${stemName}" onclick="togglePlayStem('${stemName}')">
+                    <button class="btn-play-pause" id="btn-play-${stemName}" onclick="togglePlayStem('${stemName}')" title="Toggle individual stem preview">
                         <svg class="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                         <svg class="pause-icon hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                     </button>
@@ -409,7 +451,8 @@ function displayResults(jobData) {
                             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
                             <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                         </svg>
-                        <input type="range" class="volume-slider" min="0" max="1" step="0.05" value="0.8" oninput="setStemVolume('${stemName}', this.value)">
+                        <input type="range" class="volume-slider" id="vol-slider-${stemName}" min="0" max="1" step="0.05" value="1.0" oninput="setStemVolume('${stemName}', this.value)" title="Track Volume Fader">
+                        <span class="vol-label" id="vol-label-${stemName}" style="font-size: 0.75rem; color: var(--text-muted); width: 34px;">100%</span>
                     </div>
                 </div>
             </div>
@@ -433,21 +476,47 @@ function displayResults(jobData) {
         ws.load(audioUrl);
 
         ws.on('ready', () => {
-            document.getElementById(`time-${stemName}`).textContent = `00:00 / ${formatTime(ws.getDuration())}`;
+            const dur = ws.getDuration();
+            document.getElementById(`time-${stemName}`).textContent = `00:00 / ${formatTime(dur)}`;
+            const masterTime = document.getElementById('master-time-display');
+            if (masterTime && masterTime.textContent === '00:00 / 00:00') {
+                masterTime.textContent = `00:00 / ${formatTime(dur)}`;
+            }
         });
 
         ws.on('audioprocess', () => {
-            const current = formatTime(ws.getCurrentTime());
-            const total = formatTime(ws.getDuration());
-            document.getElementById(`time-${stemName}`).textContent = `${current} / ${total}`;
+            const current = ws.getCurrentTime();
+            const dur = ws.getDuration();
+            document.getElementById(`time-${stemName}`).textContent = `${formatTime(current)} / ${formatTime(dur)}`;
+            
+            // Sync Master Scrubber & Time readout
+            if (masterPlaying && dur > 0) {
+                const pct = (current / dur) * 100;
+                const scrubber = document.getElementById('master-scrubber');
+                if (scrubber && !scrubber.matches(':active')) {
+                    scrubber.value = pct;
+                }
+                const masterTime = document.getElementById('master-time-display');
+                if (masterTime) {
+                    masterTime.textContent = `${formatTime(current)} / ${formatTime(dur)}`;
+                }
+            }
         });
 
         ws.on('finish', () => {
-            const btn = document.getElementById(`btn-play-${stemName}`);
-            btn.querySelector('.play-icon').classList.remove('hidden');
-            btn.querySelector('.pause-icon').classList.add('hidden');
-            const wContainer = document.getElementById(`waveform-${stemName}`);
-            if (wContainer) wContainer.classList.remove('playing');
+            updateStemPlayButton(stemName, false);
+            setStemEQDancing(stemName, false);
+            
+            // If all stems finished, pause master
+            const anyPlaying = Object.values(wavesurferInstances).some(inst => inst && inst.isPlaying());
+            if (!anyPlaying) {
+                pauseMasterMix();
+            }
+        });
+
+        // User clicked inside waveform to seek -> Sync all stems to that exact ratio!
+        ws.on('interaction', (newProgress) => {
+            seekAllStems(newProgress * 100);
         });
 
         wavesurferInstances[stemName] = ws;
@@ -457,63 +526,298 @@ function displayResults(jobData) {
     document.getElementById('btn-download-all').setAttribute('onclick', `downloadAllStems('${jobData.job_id}')`);
 }
 
-function togglePlayStem(stemName) {
-    const ws = wavesurferInstances[stemName];
-    if (!ws) return;
+// ==========================================================================
+// SYNCHRONIZED STUDIO MIXER CONTROLLERS
+// ==========================================================================
 
-    const btn = document.getElementById(`btn-play-${stemName}`);
-    const container = document.getElementById(`waveform-${stemName}`);
-
-    // If it's already playing, pause it
-    if (ws.isPlaying()) {
-        ws.pause();
-        btn.querySelector('.play-icon').classList.remove('hidden');
-        btn.querySelector('.pause-icon').classList.add('hidden');
-        if (container) container.classList.remove('playing');
-        currentPlayingInstance = null;
+function toggleMasterPlay() {
+    if (isABComparing) {
+        toggleABCompare(); // switch back to stems when hitting master play
+    }
+    if (masterPlaying) {
+        pauseMasterMix();
     } else {
-        // Pause any other stem that might be playing currently to avoid sound overlapping
-        pauseAllAudio();
+        playMasterMix();
+    }
+}
+
+function playMasterMix() {
+    masterPlaying = true;
+    updateMasterPlayButton(true);
+
+    const hasSolo = Object.values(stemStates).some(s => s.soloed);
+    const masterVol = parseFloat(document.getElementById('master-volume-slider')?.value || 1.0);
+
+    // Get reference playhead time
+    const firstWs = Object.values(wavesurferInstances)[0];
+    const refRatio = firstWs ? (firstWs.getCurrentTime() / (firstWs.getDuration() || 1)) : 0;
+
+    Object.keys(wavesurferInstances).forEach(name => {
+        const ws = wavesurferInstances[name];
+        const state = stemStates[name];
+        if (!ws || !state) return;
+
+        // Ensure phase lock
+        ws.seekTo(refRatio);
+
+        const isAudible = hasSolo ? state.soloed : !state.muted;
+        const targetVol = isAudible ? (state.volume * masterVol) : 0;
+        ws.setVolume(targetVol);
         ws.play();
-        btn.querySelector('.play-icon').classList.add('hidden');
-        btn.querySelector('.pause-icon').classList.remove('hidden');
-        if (container) container.classList.add('playing');
-        currentPlayingInstance = ws;
-    }
+
+        updateStemPlayButton(name, isAudible);
+        setStemEQDancing(name, isAudible);
+    });
 }
 
-function setStemVolume(stemName, val) {
-    const ws = wavesurferInstances[stemName];
-    if (ws) {
-        ws.setVolume(val);
-    }
-}
+function pauseMasterMix() {
+    masterPlaying = false;
+    updateMasterPlayButton(false);
 
-function pauseAllAudio() {
-    // Pause original preview player
-    if (originalWavesurfer && originalWavesurfer.isPlaying()) {
-        originalWavesurfer.pause();
-        const btnPlay = document.getElementById('btn-play-original');
-        btnPlay.querySelector('.play-icon').classList.remove('hidden');
-        btnPlay.querySelector('.pause-icon').classList.add('hidden');
-    }
-    const origWf = document.getElementById('original-waveform-preview');
-    if (origWf) origWf.classList.remove('playing');
-
-    // Pause all stem players
     Object.keys(wavesurferInstances).forEach(name => {
         const ws = wavesurferInstances[name];
         if (ws && ws.isPlaying()) {
             ws.pause();
-            const btn = document.getElementById(`btn-play-${name}`);
-            btn.querySelector('.play-icon').classList.remove('hidden');
-            btn.querySelector('.pause-icon').classList.add('hidden');
         }
-        const stemWf = document.getElementById(`waveform-${name}`);
-        if (stemWf) stemWf.classList.remove('playing');
+        updateStemPlayButton(name, false);
+        setStemEQDancing(name, false);
     });
-    
-    currentPlayingInstance = null;
+
+    if (originalWavesurfer && originalWavesurfer.isPlaying()) {
+        originalWavesurfer.pause();
+    }
+}
+
+function updateMasterPlayButton(isPlaying) {
+    const btn = document.getElementById('btn-master-play');
+    const label = document.getElementById('master-play-label');
+    if (!btn) return;
+
+    if (isPlaying) {
+        btn.querySelector('.play-icon')?.classList.add('hidden');
+        btn.querySelector('.pause-icon')?.classList.remove('hidden');
+        if (label) label.textContent = 'Pause Mix';
+    } else {
+        btn.querySelector('.play-icon')?.classList.remove('hidden');
+        btn.querySelector('.pause-icon')?.classList.add('hidden');
+        if (label) label.textContent = 'Play Mix';
+    }
+}
+
+function seekAllStems(pct) {
+    const ratio = Math.max(0, Math.min(1, parseFloat(pct) / 100));
+    Object.values(wavesurferInstances).forEach(ws => {
+        if (ws) ws.seekTo(ratio);
+    });
+    if (originalWavesurfer) {
+        originalWavesurfer.seekTo(ratio);
+    }
+
+    const first = Object.values(wavesurferInstances)[0];
+    if (first && first.getDuration() > 0) {
+        const cur = first.getDuration() * ratio;
+        const dur = first.getDuration();
+        const readout = document.getElementById('master-time-display');
+        if (readout) readout.textContent = `${formatTime(cur)} / ${formatTime(dur)}`;
+    }
+}
+
+function toggleSolo(stemName) {
+    const state = stemStates[stemName];
+    if (!state) return;
+
+    const wasSoloed = state.soloed;
+
+    // Reset all solo indicators
+    Object.keys(stemStates).forEach(name => {
+        stemStates[name].soloed = false;
+        const btn = document.getElementById(`btn-solo-${name}`);
+        if (btn) btn.classList.remove('active');
+    });
+
+    if (!wasSoloed) {
+        state.soloed = true;
+        const btn = document.getElementById(`btn-solo-${stemName}`);
+        if (btn) btn.classList.add('active');
+        showToast(`Solo Active: ${stemName.toUpperCase()}`, 'info');
+    } else {
+        showToast('Solo cleared', 'info');
+    }
+
+    applyStemVolumes();
+}
+
+function toggleMute(stemName) {
+    const state = stemStates[stemName];
+    if (!state) return;
+
+    state.muted = !state.muted;
+    const btn = document.getElementById(`btn-mute-${stemName}`);
+    if (btn) {
+        btn.classList.toggle('active', state.muted);
+    }
+    showToast(`${stemName.toUpperCase()} ${state.muted ? 'Muted' : 'Unmuted'}`, 'info');
+    applyStemVolumes();
+}
+
+function applyStemVolumes() {
+    const hasSolo = Object.values(stemStates).some(s => s.soloed);
+    const masterVol = parseFloat(document.getElementById('master-volume-slider')?.value || 1.0);
+
+    Object.keys(wavesurferInstances).forEach(name => {
+        const ws = wavesurferInstances[name];
+        const state = stemStates[name];
+        if (!ws || !state) return;
+
+        let targetVol = 0;
+        if (hasSolo) {
+            targetVol = state.soloed ? (state.volume * masterVol) : 0;
+        } else {
+            targetVol = state.muted ? 0 : (state.volume * masterVol);
+        }
+
+        ws.setVolume(targetVol);
+        const isAudible = targetVol > 0;
+        setStemEQDancing(name, isAudible && masterPlaying);
+        updateStemPlayButton(name, isAudible && masterPlaying);
+    });
+}
+
+function setStemVolume(stemName, val) {
+    const state = stemStates[stemName];
+    if (state) {
+        state.volume = parseFloat(val);
+    }
+    const label = document.getElementById(`vol-label-${stemName}`);
+    if (label) {
+        label.textContent = `${Math.round(parseFloat(val) * 100)}%`;
+    }
+    applyStemVolumes();
+}
+
+function setMasterVolume(val) {
+    applyStemVolumes();
+}
+
+function toggleABCompare() {
+    isABComparing = !isABComparing;
+    const btn = document.getElementById('btn-ab-compare');
+    const label = document.getElementById('ab-label');
+
+    if (isABComparing) {
+        if (btn) btn.classList.add('active-original');
+        if (label) label.textContent = 'Mode: Raw Original';
+
+        // Silence all stems
+        Object.values(wavesurferInstances).forEach(ws => ws.setVolume(0));
+
+        // Sync and play original
+        if (originalWavesurfer) {
+            const first = Object.values(wavesurferInstances)[0];
+            if (first && first.getDuration() > 0) {
+                originalWavesurfer.seekTo(first.getCurrentTime() / first.getDuration());
+            }
+            originalWavesurfer.setVolume(1.0);
+            if (masterPlaying) {
+                originalWavesurfer.play();
+            }
+        }
+        showToast('A/B Test: Listening to Raw Original Upload', 'warning');
+    } else {
+        if (btn) btn.classList.remove('active-original');
+        if (label) label.textContent = 'Mode: Isolated Stems';
+
+        if (originalWavesurfer && originalWavesurfer.isPlaying()) {
+            originalWavesurfer.pause();
+        }
+        applyStemVolumes();
+        showToast('A/B Test: Listening to Isolated Stems Mix', 'success');
+    }
+}
+
+function changePlaybackRate(val) {
+    const rate = parseFloat(val);
+    Object.values(wavesurferInstances).forEach(ws => {
+        if (ws && typeof ws.setPlaybackRate === 'function') {
+            ws.setPlaybackRate(rate);
+        }
+    });
+    if (originalWavesurfer && typeof originalWavesurfer.setPlaybackRate === 'function') {
+        originalWavesurfer.setPlaybackRate(rate);
+    }
+    showToast(`Playback speed: ${val}x`, 'info');
+}
+
+function resetStudioMixer() {
+    Object.keys(stemStates).forEach(name => {
+        stemStates[name].muted = false;
+        stemStates[name].soloed = false;
+        stemStates[name].volume = 1.0;
+        const soloBtn = document.getElementById(`btn-solo-${name}`);
+        if (soloBtn) soloBtn.classList.remove('active');
+        const muteBtn = document.getElementById(`btn-mute-${name}`);
+        if (muteBtn) muteBtn.classList.remove('active');
+        const slider = document.getElementById(`vol-slider-${name}`);
+        if (slider) slider.value = 1.0;
+        const label = document.getElementById(`vol-label-${name}`);
+        if (label) label.textContent = '100%';
+    });
+
+    const masterVol = document.getElementById('master-volume-slider');
+    if (masterVol) masterVol.value = 1.0;
+
+    const rateSelect = document.getElementById('select-playback-rate');
+    if (rateSelect) {
+        rateSelect.value = '1.0';
+        changePlaybackRate(1.0);
+    }
+
+    if (isABComparing) {
+        toggleABCompare();
+    } else {
+        applyStemVolumes();
+    }
+    showToast('Studio mixer faders reset to default', 'info');
+}
+
+function updateStemPlayButton(stemName, isPlaying) {
+    const btn = document.getElementById(`btn-play-${stemName}`);
+    if (!btn) return;
+    if (isPlaying) {
+        btn.querySelector('.play-icon')?.classList.add('hidden');
+        btn.querySelector('.pause-icon')?.classList.remove('hidden');
+    } else {
+        btn.querySelector('.play-icon')?.classList.remove('hidden');
+        btn.querySelector('.pause-icon')?.classList.add('hidden');
+    }
+}
+
+function setStemEQDancing(stemName, isDancing) {
+    const eq = document.getElementById(`eq-bars-${stemName}`);
+    const card = document.getElementById(`stem-card-${stemName}`);
+    if (eq) eq.classList.toggle('dancing', isDancing);
+    if (card) card.classList.toggle('playing', isDancing);
+}
+
+function togglePlayStem(stemName) {
+    const ws = wavesurferInstances[stemName];
+    if (!ws) return;
+
+    if (ws.isPlaying()) {
+        ws.pause();
+        updateStemPlayButton(stemName, false);
+        setStemEQDancing(stemName, false);
+    } else {
+        // Solo play this single stem
+        toggleSolo(stemName);
+        if (!masterPlaying) {
+            playMasterMix();
+        }
+    }
+}
+
+function pauseAllAudio() {
+    pauseMasterMix();
 }
 
 // 8. Copy download / stream link to clipboard
@@ -760,53 +1064,177 @@ function showToast(message, type = 'info') {
     }, 4500);
 }
 
-// Keyboard shortcuts (Space to Play/Pause active player)
+// ==========================================================================
+// SHORTCUTS, MODALS, AND FIRST-TIME ONBOARDING TOUR
+// ==========================================================================
+
+// Check if first-time user and trigger onboarding
+function checkFirstTimeUserTour() {
+    if (localStorage.getItem('am_ai_onboarding_completed') !== 'true') {
+        setTimeout(() => {
+            openOnboardingTour();
+        }, 600);
+    }
+}
+
+// Onboarding Tour Controllers
+function openOnboardingTour() {
+    currentTourSlide = 1;
+    goToTourSlide(1);
+    document.getElementById('onboarding-modal')?.classList.add('open');
+}
+
+function closeOnboardingTour() {
+    const check = document.getElementById('check-tour-dont-show');
+    if (check && check.checked) {
+        localStorage.setItem('am_ai_onboarding_completed', 'true');
+    }
+    document.getElementById('onboarding-modal')?.classList.remove('open');
+}
+
+function goToTourSlide(idx) {
+    currentTourSlide = idx;
+    const slides = document.querySelectorAll('.tour-slide');
+    const dots = document.querySelectorAll('.tour-dot');
+    const title = document.getElementById('tour-step-title');
+    const prevBtn = document.getElementById('btn-tour-prev');
+    const nextBtn = document.getElementById('btn-tour-next');
+
+    const titles = [
+        "Welcome to AM AI Studio",
+        "Precision AI Models",
+        "Live Synchronized Mixer",
+        "Hardware Power & Lossless Audio"
+    ];
+
+    slides.forEach((s, i) => s.classList.toggle('active', i === (idx - 1)));
+    dots.forEach((d, i) => d.classList.toggle('active', i === (idx - 1)));
+
+    if (title) title.textContent = titles[idx - 1] || "Studio Guide";
+    if (prevBtn) prevBtn.style.display = idx > 1 ? 'inline-block' : 'none';
+    if (nextBtn) nextBtn.textContent = idx === slides.length ? 'Launch Studio 🚀' : 'Next Step';
+}
+
+function nextTourSlide() {
+    const total = document.querySelectorAll('.tour-slide').length || 4;
+    if (currentTourSlide < total) {
+        goToTourSlide(currentTourSlide + 1);
+    } else {
+        localStorage.setItem('am_ai_onboarding_completed', 'true');
+        closeOnboardingTour();
+        showToast('Ready to create! Drag and drop any track to start.', 'success');
+    }
+}
+
+function prevTourSlide() {
+    if (currentTourSlide > 1) {
+        goToTourSlide(currentTourSlide - 1);
+    }
+}
+
+// Telemetry & Hardware Modal
+async function openTelemetryModal() {
+    try {
+        const res = await fetch('/api/system/telemetry');
+        if (res.ok) {
+            const data = await res.json();
+            // Optional live update if needed
+        }
+    } catch (e) {
+        console.log(e);
+    }
+    document.getElementById('telemetry-modal')?.classList.add('open');
+}
+
+function closeTelemetryModal() {
+    document.getElementById('telemetry-modal')?.classList.remove('open');
+}
+
+// Shortcuts Modal
+function openShortcutsModal() {
+    document.getElementById('shortcuts-modal')?.classList.add('open');
+}
+
+function closeShortcutsModal() {
+    document.getElementById('shortcuts-modal')?.classList.remove('open');
+}
+
+// Global Keyboard shortcuts
 function setupGlobalShortcuts() {
     document.addEventListener('keydown', (e) => {
-        // Spacebar shortcut
-        if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'TEXTAREA') {
+        // Do not intercept keystrokes in form inputs
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
+            return;
+        }
+
+        // Spacebar: Master Play / Pause or Preview Play / Pause
+        if (e.code === 'Space') {
             e.preventDefault();
-            
-            // Play/Pause whatever is active
-            if (currentPlayingInstance) {
-                // Determine if it's original or stem
-                if (originalWavesurfer && currentPlayingInstance === originalWavesurfer) {
-                    togglePlayOriginal();
-                } else {
-                    // find matching stem name
-                    const stemName = Object.keys(wavesurferInstances).find(k => wavesurferInstances[k] === currentPlayingInstance);
-                    if (stemName) {
-                        togglePlayStem(stemName);
-                    }
-                }
-            } else {
-                // If nothing playing, but we have original preview loaded, play it
-                if (sections.preview.classList.contains('active') && originalWavesurfer) {
-                    togglePlayOriginal();
-                } else if (sections.results.classList.contains('active')) {
-                    // Play first stem in results
-                    const firstStem = Object.keys(wavesurferInstances)[0];
-                    if (firstStem) {
-                        togglePlayStem(firstStem);
-                    }
-                }
+            if (sections.results.classList.contains('active')) {
+                toggleMasterPlay();
+            } else if (sections.preview.classList.contains('active') && originalWavesurfer) {
+                togglePlayOriginal();
             }
         }
-        
-        // Escape shortcut for modals
+
+        // S: Solo active stem or first stem
+        if (e.key === 's' || e.key === 'S') {
+            if (sections.results.classList.contains('active')) {
+                const first = Object.keys(wavesurferInstances)[0];
+                if (first) toggleSolo(first);
+            }
+        }
+
+        // M: Mute active stem or first stem
+        if (e.key === 'm' || e.key === 'M') {
+            if (sections.results.classList.contains('active')) {
+                const first = Object.keys(wavesurferInstances)[0];
+                if (first) toggleMute(first);
+            }
+        }
+
+        // Left Arrow: Skip back 5 seconds
+        if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            const first = Object.values(wavesurferInstances)[0];
+            if (first && first.getDuration() > 0) {
+                const newTime = Math.max(0, first.getCurrentTime() - 5);
+                seekAllStems((newTime / first.getDuration()) * 100);
+            }
+        }
+
+        // Right Arrow: Skip forward 5 seconds
+        if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            const first = Object.values(wavesurferInstances)[0];
+            if (first && first.getDuration() > 0) {
+                const newTime = Math.min(first.getDuration(), first.getCurrentTime() + 5);
+                seekAllStems((newTime / first.getDuration()) * 100);
+            }
+        }
+
+        // Question mark: Open shortcuts
+        if (e.key === '?') {
+            openShortcutsModal();
+        }
+
+        // Escape: Close any open modal
         if (e.code === 'Escape') {
             closeAboutModal();
+            closeOnboardingTour();
+            closeTelemetryModal();
+            closeShortcutsModal();
         }
     });
 }
 
 // Modal Controllers
 function openAboutModal() {
-    document.getElementById('about-modal').classList.add('open');
+    document.getElementById('about-modal')?.classList.add('open');
 }
 
 function closeAboutModal() {
-    document.getElementById('about-modal').classList.remove('open');
+    document.getElementById('about-modal')?.classList.remove('open');
 }
 
 // 10. Update Model Descriptions Helper

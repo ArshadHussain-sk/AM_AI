@@ -21,11 +21,19 @@ import database
 # Check PyTorch and CUDA availability gracefully
 cuda_available = False
 torch_version = "Not Installed"
+gpu_device_name = "Not Detected"
+gpu_vram_gb = 0.0
+gpu_device_count = 0
+
 try:
     import torch
     cuda_available = torch.cuda.is_available()
     torch_version = torch.__version__
-except ImportError:
+    if cuda_available:
+        gpu_device_count = torch.cuda.device_count()
+        gpu_device_name = torch.cuda.get_device_name(0)
+        gpu_vram_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1)
+except Exception:
     pass
 
 # Check FFmpeg availability
@@ -288,6 +296,10 @@ def run_separation(job_id: str):
     # Build Demucs command (Force demucs to write WAV outputs losslessly)
     cmd = [sys.executable, "-m", "demucs", "-n", model_name, "-d", target_device, "-o", job_out_dir]
     
+    # Enable memory-safe chunking on GPU (safeguards 6GB VRAM on RTX 4050 from OOM)
+    if target_device == "cuda":
+        cmd.extend(["--segment", "7"])
+
     if mode == "2stems":
         cmd.extend(["--two-stems", "vocals"])
         
@@ -497,7 +509,14 @@ def cleanup_old_jobs():
     if jobs_to_delete:
         for job_id in jobs_to_delete:
             jobs.pop(job_id, None)
-        save_history()
+            try:
+                conn = database.get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
         print(f"Cleaned up {len(jobs_to_delete)} expired jobs from disk and history.")
 
 # Run cleanup periodically in a background thread to prevent disk leakage
@@ -529,9 +548,29 @@ def read_root(request: Request):
         "username": request.session.get("username", "User"),
         "cuda_available": cuda_available,
         "torch_version": torch_version,
+        "gpu_device_name": gpu_device_name,
+        "gpu_vram_gb": gpu_vram_gb,
         "has_ffmpeg": has_ffmpeg,
         "github_url": GITHUB_URL
     })
+
+# API: GET System Hardware Telemetry
+@app.get("/api/system/telemetry")
+def get_system_telemetry(request: Request):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return {
+        "cuda_available": cuda_available,
+        "torch_version": torch_version,
+        "gpu_device_name": gpu_device_name,
+        "gpu_vram_gb": gpu_vram_gb,
+        "gpu_device_count": gpu_device_count,
+        "has_ffmpeg": has_ffmpeg,
+        "models_available": ["htdemucs", "htdemucs_ft", "mdx_extra", "htdemucs_6s"],
+        "os": sys.platform,
+        "python_version": sys.version.split(" ")[0]
+    }
 
 # AUTHENTICATION API ROUTES
 @app.get("/login")
