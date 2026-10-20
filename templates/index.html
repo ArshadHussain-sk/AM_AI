@@ -196,12 +196,12 @@
                         <div class="form-group">
                             <label class="form-label" for="select-model">Model Quality Engine</label>
                             <select class="form-select" id="select-model" onchange="updateModelDescription()">
-                                <option value="htdemucs" selected>HTDemucs (Default, Fast & Balanced)</option>
-                                <option value="htdemucs_ft">🎧 HTDemucs FT (Fine-tuned, High Fidelity)</option>
-                                <option value="mdx_extra">🎧 MDX-Net Extra (Premium Vocals/Instrumental)</option>
-                                <option value="htdemucs_6s">HTDemucs 6S (6 Stems isolation)</option>
+                                <option value="htdemucs_ft" selected>🎧 HTDemucs FT (Recommended — Fine-Tuned, Pristine Audio)</option>
+                                <option value="htdemucs">HTDemucs (Standard, Fast & Balanced)</option>
+                                <option value="mdx_extra">🎧 MDX-Net Extra (Specialized Vocals Isolation)</option>
+                                <option value="htdemucs_6s">HTDemucs 6S (6 Stems: Guitar & Piano Isolation)</option>
                             </select>
-                            <span class="form-help" id="model-help-text">Standard Hybrid Transformer Demucs. Fast and balanced separation.</span>
+                            <span class="form-help" id="model-help-text">🎧 <strong>Recommended for Headphones (Fine-Tuned)</strong>: Maximum clarity, minimum noise, and zero transient distortion.</span>
                         </div>
 
                         <div class="form-group margin-top-medium">
@@ -221,8 +221,8 @@
                                     <input type="checkbox" id="check-normalize" checked>
                                     <span class="checkbox-custom"></span>
                                     <div class="checkbox-content">
-                                        <span class="checkbox-header">Smart Normalization</span>
-                                        <span class="checkbox-desc">Boosts audio levels to optimal volume (-1dB) without distortion.</span>
+                                        <span class="checkbox-header">Pure Audio Ceiling Guard</span>
+                                        <span class="checkbox-desc">Prevents digital clipping while preserving 100% of the natural dynamic range.</span>
                                     </div>
                                 </label>
                                 <label class="checkbox-label">

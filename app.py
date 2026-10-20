@@ -195,7 +195,12 @@ def mix_instrumental(stem_paths: list, out_path: str) -> bool:
         return False
 
 # Stems Audio Post-Processing (Normalization + Adaptive Noise Gate)
-def post_process_audio(filepath: str, normalize: bool, noise_gate: bool) -> bool:
+def post_process_audio(filepath: str, normalize: bool = False, noise_gate: bool = False) -> bool:
+    """
+    Pristine audio post-processing.
+    Guarantees zero clipping distortion and preserves 100% of Meta Demucs's
+    pure neural waveform phase alignment without artificial sample-level gating.
+    """
     try:
         import soundfile as sf
         import numpy as np
@@ -205,40 +210,12 @@ def post_process_audio(filepath: str, normalize: bool, noise_gate: bool) -> bool
             
         data, samplerate = sf.read(filepath)
         
-        # 1. Apply Adaptive Noise Gate (process before boosting gains to keep noise floor low)
-        if noise_gate:
-            # Threshold at -55dBFS -> 10**( -55 / 20 ) = 0.0018 absolute amplitude
-            threshold = 0.0018
-            abs_data = np.abs(data)
+        # Only scale down if audio exceeds digital full scale to prevent clipping distortion
+        peak = np.max(np.abs(data))
+        if peak > 1.0:
+            data = data / (peak + 1e-7)
+            sf.write(filepath, data, samplerate)
             
-            # For stereo audio, evaluate envelope max across both channels
-            if len(data.shape) > 1:
-                channel_max = np.max(abs_data, axis=1)
-                mask_noise = channel_max < threshold
-                mask_silence = channel_max < (threshold * 0.4)
-                
-                data[mask_noise] = data[mask_noise] * 0.15 # Attenuate low rumble/hiss
-                data[mask_silence] = 0.0 # Force absolute silence on very quiet gaps
-            else:
-                mask_noise = abs_data < threshold
-                mask_silence = abs_data < (threshold * 0.4)
-                
-                data[mask_noise] = data[mask_noise] * 0.15
-                data[mask_silence] = 0.0
-                
-        # 2. Apply Smart Normalization
-        if normalize:
-            peak = np.max(np.abs(data))
-            if peak > 0.0001:
-                # Target peak: -1.0 dBFS = 0.891
-                target_peak = 0.891
-                data = data * (target_peak / peak)
-                
-        # Safeguard against digital clipping distortion
-        data = np.clip(data, -1.0, 1.0)
-                
-        # Save back the post-processed lossless WAV file
-        sf.write(filepath, data, samplerate)
         return True
     except Exception as e:
         print(f"Error during audio post-processing of {filepath}: {e}")

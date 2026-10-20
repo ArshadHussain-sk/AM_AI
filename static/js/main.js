@@ -563,10 +563,16 @@ function playMasterMix() {
         const isAudible = hasSolo ? state.soloed : !state.muted;
         const targetVol = isAudible ? (state.volume * masterVol) : 0;
         ws.setVolume(targetVol);
-        ws.play();
 
-        updateStemPlayButton(name, isAudible);
-        setStemEQDancing(name, isAudible);
+        if (isAudible) {
+            ws.play();
+            updateStemPlayButton(name, true);
+            setStemEQDancing(name, true);
+        } else {
+            ws.pause();
+            updateStemPlayButton(name, false);
+            setStemEQDancing(name, false);
+        }
     });
 }
 
@@ -678,8 +684,18 @@ function applyStemVolumes() {
 
         ws.setVolume(targetVol);
         const isAudible = targetVol > 0;
-        setStemEQDancing(name, isAudible && masterPlaying);
-        updateStemPlayButton(name, isAudible && masterPlaying);
+        
+        if (masterPlaying) {
+            if (isAudible) {
+                if (!ws.isPlaying()) ws.play();
+                updateStemPlayButton(name, true);
+                setStemEQDancing(name, true);
+            } else {
+                if (ws.isPlaying()) ws.pause();
+                updateStemPlayButton(name, false);
+                setStemEQDancing(name, false);
+            }
+        }
     });
 }
 
@@ -803,21 +819,62 @@ function togglePlayStem(stemName) {
     const ws = wavesurferInstances[stemName];
     if (!ws) return;
 
+    // 1. If this exact stem is already playing, simply pause it
     if (ws.isPlaying()) {
         ws.pause();
         updateStemPlayButton(stemName, false);
         setStemEQDancing(stemName, false);
-    } else {
-        // Solo play this single stem
-        toggleSolo(stemName);
-        if (!masterPlaying) {
-            playMasterMix();
-        }
+        currentPlayingInstance = null;
+        return;
     }
+
+    // 2. PAUSE ALL OTHER PLAYERS ON THE ENTIRE PAGE IMMEDIATELY
+    // Only the single selected stem will play!
+    pauseAllAudio();
+
+    // 3. Mark master mix as not playing
+    masterPlaying = false;
+    updateMasterPlayButton(false);
+
+    // 4. Restore volume for this single stem from its volume slider
+    const volSlider = document.getElementById(`vol-slider-${stemName}`);
+    const targetVol = volSlider ? parseFloat(volSlider.value) : 1.0;
+    ws.setVolume(targetVol);
+
+    // 5. Play ONLY this individual stem
+    ws.play();
+    updateStemPlayButton(stemName, true);
+    setStemEQDancing(stemName, true);
+    currentPlayingInstance = ws;
 }
 
 function pauseAllAudio() {
-    pauseMasterMix();
+    masterPlaying = false;
+    updateMasterPlayButton(false);
+
+    // Pause all stem wavesurfers completely
+    Object.keys(wavesurferInstances).forEach(name => {
+        const ws = wavesurferInstances[name];
+        if (ws) {
+            ws.pause();
+        }
+        updateStemPlayButton(name, false);
+        setStemEQDancing(name, false);
+    });
+
+    // Pause original preview player if active
+    if (originalWavesurfer && originalWavesurfer.isPlaying()) {
+        originalWavesurfer.pause();
+        const btnPlay = document.getElementById('btn-play-original');
+        if (btnPlay) {
+            btnPlay.querySelector('.play-icon')?.classList.remove('hidden');
+            btnPlay.querySelector('.pause-icon')?.classList.add('hidden');
+        }
+        const origWf = document.getElementById('original-waveform-preview');
+        if (origWf) origWf.classList.remove('playing');
+    }
+
+    currentPlayingInstance = null;
 }
 
 // 8. Copy download / stream link to clipboard
@@ -1167,10 +1224,18 @@ function setupGlobalShortcuts() {
             return;
         }
 
-        // Spacebar: Master Play / Pause or Preview Play / Pause
+        // Spacebar: Play / Pause active stem or Master Mix
         if (e.code === 'Space') {
             e.preventDefault();
             if (sections.results.classList.contains('active')) {
+                // If an individual stem is currently playing, pause/resume it directly
+                if (currentPlayingInstance) {
+                    const activeStem = Object.keys(wavesurferInstances).find(k => wavesurferInstances[k] === currentPlayingInstance);
+                    if (activeStem) {
+                        togglePlayStem(activeStem);
+                        return;
+                    }
+                }
                 toggleMasterPlay();
             } else if (sections.preview.classList.contains('active') && originalWavesurfer) {
                 togglePlayOriginal();
