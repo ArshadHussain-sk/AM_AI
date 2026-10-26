@@ -1309,10 +1309,10 @@ function updateModelDescription() {
     if (!modelSelect || !helpText) return;
     
     const descriptions = {
-        'htdemucs': 'Standard Hybrid Transformer Demucs. Fast, stable, and balanced.',
-        'htdemucs_ft': '🎧 <strong>Recommended for Headphones (Fine-Tuned)</strong>: Maximum clarity, minimum noise, and transient preservation. Highly recommended for premium listening.',
-        'mdx_extra': '🎧 <strong>Recommended (MDX-Net Extra)</strong>: Excellent vocal and instrumental separation, optimized to prevent bleeding between tracks.',
-        'htdemucs_6s': '6-Stem Separation Engine: Isolates Guitar and Piano in addition to vocals, drums, bass, and other.'
+        'htdemucs': '⚡ <strong>Recommended (Ultra-Fast 1-Pass Engine)</strong>: Blazing fast single pass (~15-20s on RTX 4050 GPU) with zero repeated loops.',
+        'htdemucs_ft': '🎧 <strong>HTDemucs FT (Fine-Tuned 4-Model Bag)</strong>: Evaluates 4 sequential passes for drums, bass, vocals, and other. Takes 4x longer than standard HTDemucs.',
+        'mdx_extra': '🎧 <strong>MDX-Net Extra</strong>: Specialized single-pass vocal and instrumental separation.',
+        'htdemucs_6s': '6-Stem Separation Engine: Isolates Guitar and Piano in addition to vocals, drums, bass, and other in a single pass.'
     };
     helpText.innerHTML = descriptions[modelSelect.value] || 'Standard Separation Model.';
 }

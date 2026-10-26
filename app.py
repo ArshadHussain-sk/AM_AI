@@ -18,6 +18,18 @@ from fastapi import Request
 from starlette.middleware.sessions import SessionMiddleware
 import database
 
+# Directories
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Detect best Python executable (prioritize virtual environment with CUDA acceleration)
+VENV_PYTHON = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")
+PYTHON_EXEC = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
+
 # Check PyTorch and CUDA availability gracefully
 cuda_available = False
 torch_version = "Not Installed"
@@ -36,16 +48,32 @@ try:
 except Exception:
     pass
 
+# If host python has no CUDA, inspect the virtual environment for CUDA acceleration
+if not cuda_available and os.path.exists(VENV_PYTHON):
+    try:
+        import subprocess
+        check_code = (
+            "import torch, json; "
+            "avail = torch.cuda.is_available(); "
+            "name = torch.cuda.get_device_name(0) if avail else 'CPU'; "
+            "mem = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1) if avail else 0.0; "
+            "print(json.dumps({'cuda': avail, 'name': name, 'mem': mem, 'ver': torch.__version__}))"
+        )
+        res = subprocess.run([VENV_PYTHON, "-c", check_code], capture_output=True, text=True, timeout=8)
+        if res.returncode == 0:
+            telemetry = json.loads(res.stdout.strip())
+            if telemetry.get("cuda"):
+                cuda_available = True
+                gpu_device_name = telemetry.get("name")
+                gpu_vram_gb = telemetry.get("mem")
+                torch_version = telemetry.get("ver")
+                gpu_device_count = 1
+                print(f"CUDA Hardware Acceleration detected via venv: {gpu_device_name} ({gpu_vram_gb} GB VRAM)")
+    except Exception as e:
+        print(f"Error checking venv CUDA: {e}")
+
 # Check FFmpeg availability
 has_ffmpeg = shutil.which("ffmpeg") is not None
-
-# Directories
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Initialize database schema
 database.init_db()
@@ -270,8 +298,8 @@ def run_separation(job_id: str):
     job_out_dir = os.path.join(OUTPUT_DIR, job_id)
     os.makedirs(job_out_dir, exist_ok=True)
     
-    # Build Demucs command (Force demucs to write WAV outputs losslessly)
-    cmd = [sys.executable, "-m", "demucs", "-n", model_name, "-d", target_device, "-o", job_out_dir]
+    # Build Demucs command using CUDA-enabled Python environment
+    cmd = [PYTHON_EXEC, "-m", "demucs", "-n", model_name, "-d", target_device, "-o", job_out_dir]
     
     # Enable memory-safe chunking on GPU (safeguards 6GB VRAM on RTX 4050 from OOM)
     if target_device == "cuda":
@@ -282,11 +310,14 @@ def run_separation(job_id: str):
         
     cmd.append(in_file)
     
-    print(f"Executing Demucs job {job_id} command: {' '.join(cmd)}")
+    # Expected model passes (htdemucs_ft is a bag of 4 models; standard htdemucs is 1 model)
+    expected_passes = 4 if model_name == "htdemucs_ft" else 1
+    
+    print(f"Executing Demucs job {job_id} on {target_device} via {PYTHON_EXEC} (expected passes: {expected_passes}): {' '.join(cmd)}")
     
     try:
         # Start Demucs subprocess and capture progress via stderr (tqdm)
-        process = subprocess_run(cmd, job_id)
+        process = subprocess_run(cmd, job_id, expected_passes=expected_passes)
         if process != 0:
             raise Exception("Demucs separation failed with non-zero exit code.")
             
@@ -409,7 +440,7 @@ def run_separation(job_id: str):
         job["error"] = str(e)
         database.update_job_status(job_id, "failed", job.get("progress", 0), str(e))
 
-def subprocess_run(cmd, job_id) -> int:
+def subprocess_run(cmd, job_id, expected_passes: int = 1) -> int:
     import subprocess
     # Run Demucs subprocess
     process = subprocess.Popen(
@@ -424,19 +455,47 @@ def subprocess_run(cmd, job_id) -> int:
     
     # Monitor progress from stderr
     buffer = ""
+    current_pass = 1
+    last_pct = 0
+    is_downloading = False
+
     while True:
         char = process.stderr.read(1)
         if not char:
             break
         if char == '\r' or char == '\n':
+            lower_buf = buffer.lower()
+            
+            # Detect model weight download (don't confuse with separation progress)
+            if "downloading" in lower_buf or "checkpoint" in lower_buf:
+                is_downloading = True
+            
+            if is_downloading:
+                if "%" in buffer and ("mb" in lower_buf or "100%" in buffer):
+                    # Finished a download line, reset flag
+                    if "100%" in buffer:
+                        is_downloading = False
+                    buffer = ""
+                    continue
+
             # Look for progress percentages in stderr buffer
             # Demucs tqdm format looks like: 54%|█████▍    | 54.2/100.0 [00:12<00:10]
             match = re.search(r"(\d+)%", buffer)
             if match:
                 pct = int(match.group(1))
-                # Map 0-100% of demucs separation to 10-95% of job progress
-                progress = int(10 + (pct * 0.85))
-                if jobs[job_id]["progress"] != progress:
+                
+                # Detect start of next pass in multi-model bags (e.g. htdemucs_ft)
+                if pct < (last_pct - 35) and last_pct >= 85:
+                    current_pass = min(expected_passes, current_pass + 1)
+                last_pct = pct
+
+                # Compute overall monotonic progress across passes
+                overall_pct = ((current_pass - 1) * 100.0 + pct) / max(1, expected_passes)
+                progress = int(10 + (overall_pct * 0.85))
+                
+                # Monotonically increasing progress: never let progress regress backwards!
+                current_prog = jobs[job_id].get("progress", 0)
+                if progress > current_prog:
                     jobs[job_id]["progress"] = progress
                     database.update_job_status(job_id, "processing", progress)
             buffer = ""
