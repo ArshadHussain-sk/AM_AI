@@ -171,6 +171,14 @@
                                 </div>
                             </label>
                             <label class="radio-label">
+                                <input type="radio" name="separate-mode" value="synth" onclick="updateModeUI('synth')">
+                                <span class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-header">🎹 Synthesizer & Backing Track (Dedicated Synth Extraction)</span>
+                                    <span class="radio-desc">SOTA BS-RoFormer neural separation. Isolates electronic synthesizer leads, arpeggiators, chords, and pads into a dedicated stem. Outperforms LALAL.AI.</span>
+                                </div>
+                            </label>
+                            <label class="radio-label">
                                 <input type="radio" name="separate-mode" value="4stems" onclick="updateModeUI('4stems')">
                                 <span class="radio-custom"></span>
                                 <div class="radio-content">
@@ -186,6 +194,14 @@
                                     <span class="radio-desc">Deconstruct into vocals, drums, bass, guitar, piano, and other stems. Leverages the 6-stem model.</span>
                                 </div>
                             </label>
+                            <label class="radio-label">
+                                <input type="radio" name="separate-mode" value="7stems" onclick="updateModeUI('7stems')">
+                                <span class="radio-custom"></span>
+                                <div class="radio-content">
+                                    <span class="radio-header">👑 Master Studio 7 Stems (Vocals, Drums, Bass, Guitar, Piano, Synth & FX)</span>
+                                    <span class="radio-desc">Category-defining 7-stem studio deconstruction. Cascades Demucs v4 and BS-RoFormer to isolate seven distinct musical stems.</span>
+                                </div>
+                            </label>
                         </div>
                     </div>
 
@@ -197,6 +213,7 @@
                             <label class="form-label" for="select-model">Model Quality Engine</label>
                             <select class="form-select" id="select-model" onchange="updateModelDescription()">
                                 <option value="htdemucs" selected>⚡ HTDemucs (Recommended — Ultra-Fast, 1 Single Pass)</option>
+                                <option value="bsroformer_synth">🎹 BS-RoFormer Synth Lead (SOTA Synthesizer Specialist)</option>
                                 <option value="htdemucs_ft">🎧 HTDemucs FT (Fine-Tuned 4-Model Bag — 4 Passes)</option>
                                 <option value="mdx_extra">🎧 MDX-Net Extra (Specialized Vocals Isolation)</option>
                                 <option value="htdemucs_6s">HTDemucs 6S (6 Stems: Guitar & Piano Isolation)</option>
@@ -400,7 +417,7 @@
 
         <!-- Footer -->
         <footer class="app-footer">
-            <p>© 2026 AM AI Labs. Powered by Meta Demucs neural networks. Built with PyTorch and FastAPI.</p>
+            <p>© 2026 AM AI Labs. Powered by Meta Demucs v4 & BS-RoFormer neural networks. Built with PyTorch and FastAPI.</p>
         </footer>
     </div>
 
@@ -413,17 +430,22 @@
             </div>
             <div class="modal-body">
                 <h4>Developer & Creator</h4>
-                <p>AM AI Audio Lab is created and maintained by **Arshad Hussain**. You can study and follow his projects directly on his <a href="{{ github_url }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none;">GitHub Profile (@ArshadHussain-sk)</a>.</p>
+                <p>AM AI Audio Lab is created and maintained by <strong>Arshad Hussain</strong>. You can study and follow his projects directly on his <a href="{{ github_url }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none;">GitHub Profile (@ArshadHussain-sk)</a>.</p>
 
-                <h4>Core Separator Neural Engine</h4>
-                <p>This web application utilizes **Meta's Demucs v4 (Hybrid Transformer Demucs)**. Demucs separates music tracks by employing convolutional encoders/decoders coupled with a transformer layer to process waveform and spectrogram representation models concurrently, achieving state-of-the-art separation fidelity.</p>
+                <h4>Core Neural Engine Architectures</h4>
+                <p>AM AI harnesses a dual-engine architecture:
+                <ul>
+                    <li><strong>Meta Demucs v4 (Hybrid Transformer Demucs)</strong>: Concurrently processes waveform and spectrogram representations with cross-attention to isolate vocals, drums, bass, guitar, and piano.</li>
+                    <li><strong>BS-RoFormer (Band-Split RoPE Transformer)</strong>: State-of-the-art subband transformer utilizing Rotary Position Embeddings to isolate intricate frequency harmonics, synthesizer leads, pads, and arpeggios that outperform classical mask splitters like LALAL.AI.</li>
+                </ul>
+                </p>
 
                 <h4>Hardware Configurations</h4>
                 <ul>
-                    <li><strong>AI Model:</strong> Meta Demucs (htdemucs) pretrained models.</li>
-                    <li><strong>Device Auto-Detect:</strong> Detects if PyTorch can interface with an NVIDIA GPU (via CUDA) or Apple Silicon (via MPS).</li>
-                    <li><strong>CUDA Acceleration:</strong> Offloads matrix arithmetic to your GPU cores, executing audio separation up to 10x faster than CPU modes.</li>
-                    <li><strong>FFmpeg Support:</strong> Essential for processing compressed audio containers (.mp3, .flac, .ogg, .m4a) to output clean files.</li>
+                    <li><strong>AI Models:</strong> Meta Demucs v4 & BS-RoFormer Synthesizer models.</li>
+                    <li><strong>Device Auto-Detect:</strong> Real-time hardware telemetry interfacing directly with your NVIDIA GPU via CUDA 12.1.</li>
+                    <li><strong>CUDA Acceleration:</strong> Offloads heavy matrix convolutions and attention tensors to your NVIDIA RTX GPU cores.</li>
+                    <li><strong>FFmpeg 320kbps Mastering:</strong> Pristine studio audio encoding without phase smearing or clipping distortion.</li>
                 </ul>
 
                 <h4>Development Tech Stack</h4>

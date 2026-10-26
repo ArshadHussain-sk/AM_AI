@@ -18,6 +18,12 @@ jobs.json
 uploads/
 outputs/
 
+# Large Neural Network Weights & Checkpoints
+models/
+*.ckpt
+*.pth
+*.pt
+
 # OS specific files
 .DS_Store
 Thumbs.db

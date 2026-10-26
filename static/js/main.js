@@ -214,19 +214,23 @@ function updateModeUI(mode) {
 
     const modelSelect = document.getElementById('select-model');
     if (modelSelect) {
-        if (mode === '6stems') {
+        if (mode === 'synth') {
+            modelSelect.value = 'bsroformer_synth';
+            for (let opt of modelSelect.options) {
+                opt.disabled = false;
+            }
+        } else if (mode === '6stems' || mode === '7stems') {
             modelSelect.value = 'htdemucs_6s';
-            // Disable other options to prevent user errors since 6-stems requires htdemucs_6s
             for (let opt of modelSelect.options) {
                 if (opt.value !== 'htdemucs_6s') opt.disabled = true;
+                else opt.disabled = false;
             }
         } else {
             // Enable other options
             for (let opt of modelSelect.options) {
                 opt.disabled = false;
             }
-            // If it was htdemucs_6s, switch it back to default htdemucs
-            if (modelSelect.value === 'htdemucs_6s') {
+            if (modelSelect.value === 'htdemucs_6s' || modelSelect.value === 'bsroformer_synth') {
                 modelSelect.value = 'htdemucs';
             }
         }
@@ -390,6 +394,7 @@ function displayResults(jobData) {
         bass: { wave: '#ef4444', progress: '#f87171', badge: 'Bass' },
         guitar: { wave: '#ec4899', progress: '#f43f5e', badge: 'Guitar' },
         piano: { wave: '#a855f7', progress: '#c084fc', badge: 'Piano' },
+        synthesizer: { wave: '#06b6d4', progress: '#38bdf8', badge: 'Synthesizer' },
         other: { wave: '#10b981', progress: '#34d399', badge: 'Other Stems' }
     };
 
@@ -880,17 +885,7 @@ function pauseAllAudio() {
 // 8. Copy download / stream link to clipboard
 function copyDownloadLink(stemName, jobId) {
     const host = window.location.origin;
-    // We can generate download URL structure
-    let path = `/download/vocals/${jobId}`;
-    if (stemName === 'instrumental') {
-        path = `/download/instrumental/${jobId}`;
-    } else if (['drums', 'bass', 'other', 'guitar', 'piano'].includes(stemName)) {
-        // Fall back to direct outputs access static files
-        const ws = wavesurferInstances[stemName];
-        if (ws) {
-            path = ws.getSrc();
-        }
-    }
+    const path = `/download/${stemName}/${jobId}`;
     const fullUrl = host + path;
 
     navigator.clipboard.writeText(fullUrl).then(() => {
@@ -901,23 +896,7 @@ function copyDownloadLink(stemName, jobId) {
 }
 
 function downloadStem(stemName, jobId) {
-    if (stemName === 'vocals') {
-        window.open(`/download/vocals/${jobId}`, '_blank');
-    } else if (stemName === 'instrumental') {
-        window.open(`/download/instrumental/${jobId}`, '_blank');
-    } else {
-        // For sub-stems in 4 stems, download directly from preview URL (static mounted)
-        const ws = wavesurferInstances[stemName];
-        if (ws) {
-            const url = ws.getSrc();
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${stemName}_output.mp3`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
-    }
+    window.open(`/download/${stemName}/${jobId}`, '_blank');
 }
 
 function downloadAllStems(jobId) {
@@ -1310,6 +1289,7 @@ function updateModelDescription() {
     
     const descriptions = {
         'htdemucs': '⚡ <strong>Recommended (Ultra-Fast 1-Pass Engine)</strong>: Blazing fast single pass (~15-20s on RTX 4050 GPU) with zero repeated loops.',
+        'bsroformer_synth': '🎹 <strong>BS-RoFormer Synth Engine (SOTA AI Synthesizer Specialist)</strong>: ByteDance Band-Split RoPE Transformer fine-tuned to extract synth leads, arpeggiators, electronic chords, and synth pads with surgical fidelity.',
         'htdemucs_ft': '🎧 <strong>HTDemucs FT (Fine-Tuned 4-Model Bag)</strong>: Evaluates 4 sequential passes for drums, bass, vocals, and other. Takes 4x longer than standard HTDemucs.',
         'mdx_extra': '🎧 <strong>MDX-Net Extra</strong>: Specialized single-pass vocal and instrumental separation.',
         'htdemucs_6s': '6-Stem Separation Engine: Isolates Guitar and Piano in addition to vocals, drums, bass, and other in a single pass.'

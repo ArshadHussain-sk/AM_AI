@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi import Request
 from starlette.middleware.sessions import SessionMiddleware
 import database
+import synth_separator
 
 # Directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -269,7 +270,7 @@ def encode_wav_to_mp3(wav_path: str) -> str:
         return mp3_path
     return wav_path
 
-# Demucs Worker Runner
+# Demucs & BS-RoFormer Audio Worker Runner
 def run_separation(job_id: str):
     job = jobs.get(job_id)
     if not job:
@@ -283,49 +284,92 @@ def run_separation(job_id: str):
     mode = job["mode"]
     device_choice = job["device"]
     model_name = job.get("model", "htdemucs")
+    normalize = job.get("normalize", True)
+    noise_gate = job.get("noise_gate", False)
     
-    # Enforce 6-stem model for 6stems separation
-    if mode == "6stems":
-        model_name = "htdemucs_6s"
-    
-    # Select execution device
+    # Select execution hardware device
     target_device = "cpu"
-    if device_choice == "auto":
-        target_device = "cuda" if cuda_available else "cpu"
-    elif device_choice == "cuda" or device_choice == "gpu":
+    if device_choice in ["auto", "cuda", "gpu"]:
         target_device = "cuda" if cuda_available else "cpu"
     
     job_out_dir = os.path.join(OUTPUT_DIR, job_id)
     os.makedirs(job_out_dir, exist_ok=True)
     
-    # Build Demucs command using CUDA-enabled Python environment
-    cmd = [PYTHON_EXEC, "-m", "demucs", "-n", model_name, "-d", target_device, "-o", job_out_dir]
-    
-    # Enable memory-safe chunking on GPU (safeguards 6GB VRAM on RTX 4050 from OOM)
-    if target_device == "cuda":
-        cmd.extend(["--segment", "7"])
-
-    if mode == "2stems":
-        cmd.extend(["--two-stems", "vocals"])
-        
-    cmd.append(in_file)
-    
-    # Expected model passes (htdemucs_ft is a bag of 4 models; standard htdemucs is 1 model)
-    expected_passes = 4 if model_name == "htdemucs_ft" else 1
-    
-    print(f"Executing Demucs job {job_id} on {target_device} via {PYTHON_EXEC} (expected passes: {expected_passes}): {' '.join(cmd)}")
+    def get_rel_url(abs_path):
+        if not abs_path or not os.path.exists(abs_path):
+            return None
+        rel = os.path.relpath(abs_path, BASE_DIR)
+        return "/" + rel.replace("\\", "/")
     
     try:
-        # Start Demucs subprocess and capture progress via stderr (tqdm)
+        # =========================================================================
+        # 1. DEDICATED SYNTHESIZER ISOLATION MODE (SOTA BS-RoFormer vs LALAL.AI)
+        # =========================================================================
+        if mode == "synth" or model_name == "bsroformer_synth":
+            print(f"Executing dedicated BS-RoFormer Synthesizer separation on {target_device} for job {job_id}")
+            job["progress"] = 20
+            database.update_job_status(job_id, "processing", 20)
+            
+            synth_dict = synth_separator.separate_synthesizer_mode(in_file, job_out_dir, target_device=target_device)
+            job["progress"] = 75
+            database.update_job_status(job_id, "processing", 75)
+            
+            # Post-process WAV stems
+            synth_wav = synth_dict["synthesizer"]
+            backing_wav = synth_dict["instrumental"]
+            
+            post_process_audio(synth_wav, normalize, noise_gate)
+            post_process_audio(backing_wav, normalize, noise_gate)
+            
+            # Transcode to 320kbps MP3 if ffmpeg is available
+            final_synth = encode_wav_to_mp3(synth_wav)
+            final_backing = encode_wav_to_mp3(backing_wav)
+            
+            job["stems"] = {
+                "vocals": None,
+                "instrumental": get_rel_url(final_backing),
+                "drums": None,
+                "bass": None,
+                "other": None,
+                "guitar": None,
+                "piano": None,
+                "synthesizer": get_rel_url(final_synth)
+            }
+            
+            job["status"] = "finished"
+            job["progress"] = 100
+            job["error"] = None
+            database.save_job_stems(job_id, job["stems"])
+            database.update_job_status(job_id, "finished", 100, None)
+            print(f"Synthesizer job {job_id} complete!")
+            return
+
+        # =========================================================================
+        # 2. MASTER STUDIO & DEMUCS PIPELINE (2-Stem, 4-Stem, 6-Stem, 7-Stem)
+        # =========================================================================
+        if mode in ["6stems", "7stems"]:
+            demucs_model = "htdemucs_6s"
+        else:
+            demucs_model = model_name if model_name != "bsroformer_synth" else "htdemucs"
+            
+        cmd = [PYTHON_EXEC, "-m", "demucs", "-n", demucs_model, "-d", target_device, "-o", job_out_dir]
+        if target_device == "cuda":
+            cmd.extend(["--segment", "7"])
+        if mode == "2stems":
+            cmd.extend(["--two-stems", "vocals"])
+        cmd.append(in_file)
+        
+        expected_passes = 4 if demucs_model == "htdemucs_ft" else 1
+        print(f"Executing Demucs job {job_id} on {target_device} via {PYTHON_EXEC} (expected passes: {expected_passes}): {' '.join(cmd)}")
+        
         process = subprocess_run(cmd, job_id, expected_passes=expected_passes)
         if process != 0:
             raise Exception("Demucs separation failed with non-zero exit code.")
             
         # Scan for output files recursively (these will be WAV stems)
         output_files = glob.glob(os.path.join(job_out_dir, "**", "*.wav"), recursive=True)
-        print(f"Job {job_id} complete. Found WAV stems: {output_files}")
+        print(f"Job {job_id} Demucs pass complete. Found WAV stems: {output_files}")
         
-        # Locate stems
         vocals_path = None
         instrumental_path = None
         drums_path = None
@@ -333,6 +377,7 @@ def run_separation(job_id: str):
         other_path = None
         guitar_path = None
         piano_path = None
+        synthesizer_path = None
         
         for f in output_files:
             fname = os.path.basename(f).lower()
@@ -351,30 +396,39 @@ def run_separation(job_id: str):
             elif "other" in fname:
                 other_path = f
                 
-        # Handle instrumental synthesis for multi-stem modes (4stems or 6stems)
-        if mode in ["4stems", "6stems"] and not instrumental_path:
-            instrumental_path = os.path.join(job_out_dir, model_name, "original", "no_vocals.wav")
+        # 7-STEM MODE: Isolate Synthesizer from 'other' stem using BS-RoFormer
+        if mode == "7stems" and other_path and os.path.exists(other_path):
+            job["progress"] = 75
+            database.update_job_status(job_id, "processing", 75)
+            print(f"[7-Stem Studio] Isolating Synthesizer from other stem via BS-RoFormer...")
+            
+            synth_res = synth_separator.separate_synth_from_stem(
+                source_stem_path=other_path,
+                output_dir=os.path.dirname(other_path),
+                target_device=target_device
+            )
+            synthesizer_path = synth_res.get("synthesizer")
+            other_path = synth_res.get("other")
+            job["progress"] = 90
+            database.update_job_status(job_id, "processing", 90)
+
+        # Handle instrumental synthesis for multi-stem modes
+        if mode in ["4stems", "6stems", "7stems"]:
+            instrumental_path = os.path.join(job_out_dir, demucs_model, "original", "no_vocals.wav")
             os.makedirs(os.path.dirname(instrumental_path), exist_ok=True)
             
             stems_to_mix = []
-            for path in [drums_path, bass_path, other_path, guitar_path, piano_path]:
-                if path:
+            for path in [drums_path, bass_path, other_path, guitar_path, piano_path, synthesizer_path]:
+                if path and os.path.exists(path):
                     stems_to_mix.append(path)
                     
-            success = mix_instrumental(stems_to_mix, instrumental_path)
-            if not success:
-                instrumental_path = None
+            if stems_to_mix:
+                mix_instrumental(stems_to_mix, instrumental_path)
 
-        # Fetch quality parameters from job config
-        normalize = job.get("normalize", True)
-        noise_gate = job.get("noise_gate", False)
-
-        # Apply post-processing (normalization + noise gate) and transcode to 320kbps MP3
+        # Apply audio post-processing & MP3 encoding
         all_wavs = glob.glob(os.path.join(job_out_dir, "**", "*.wav"), recursive=True)
         for w in all_wavs:
-            # Post-process WAV
             post_process_audio(w, normalize, noise_gate)
-            # Transcode WAV to MP3 if FFmpeg is available (deletes original WAV)
             encode_wav_to_mp3(w)
 
         # Re-scan output files to map final formats (MP3/WAV)
@@ -388,6 +442,7 @@ def run_separation(job_id: str):
         other_path = None
         guitar_path = None
         piano_path = None
+        synthesizer_path = None
         
         for f in final_files:
             fname = os.path.basename(f).lower()
@@ -403,15 +458,10 @@ def run_separation(job_id: str):
                 guitar_path = f
             elif "piano" in fname:
                 piano_path = f
+            elif "synthesizer" in fname:
+                synthesizer_path = f
             elif "other" in fname:
                 other_path = f
-                
-        # Resolve relative URLs
-        def get_rel_url(abs_path):
-            if not abs_path:
-                return None
-            rel = os.path.relpath(abs_path, BASE_DIR)
-            return "/" + rel.replace("\\", "/")
 
         job["stems"] = {
             "vocals": get_rel_url(vocals_path),
@@ -420,11 +470,12 @@ def run_separation(job_id: str):
             "bass": get_rel_url(bass_path),
             "other": get_rel_url(other_path),
             "guitar": get_rel_url(guitar_path),
-            "piano": get_rel_url(piano_path)
+            "piano": get_rel_url(piano_path),
+            "synthesizer": get_rel_url(synthesizer_path)
         }
         
-        # Verify that the primary stems were generated
-        if not vocals_path or not instrumental_path:
+        # Verify that primary stems were generated
+        if not vocals_path and not synthesizer_path:
             raise Exception("Failed to generate separation stems. Output files missing.")
             
         job["status"] = "finished"
@@ -433,9 +484,10 @@ def run_separation(job_id: str):
         
         database.save_job_stems(job_id, job["stems"])
         database.update_job_status(job_id, "finished", 100, None)
+        print(f"Separation job {job_id} complete!")
         
     except Exception as e:
-        print(f"Demucs execution error: {e}")
+        print(f"Separation execution error: {e}")
         job["status"] = "failed"
         job["error"] = str(e)
         database.update_job_status(job_id, "failed", job.get("progress", 0), str(e))
@@ -603,7 +655,7 @@ def get_system_telemetry(request: Request):
         "gpu_vram_gb": gpu_vram_gb,
         "gpu_device_count": gpu_device_count,
         "has_ffmpeg": has_ffmpeg,
-        "models_available": ["htdemucs", "htdemucs_ft", "mdx_extra", "htdemucs_6s"],
+        "models_available": ["htdemucs", "htdemucs_ft", "mdx_extra", "htdemucs_6s", "bsroformer_synth"],
         "os": sys.platform,
         "python_version": sys.version.split(" ")[0]
     }
@@ -822,6 +874,39 @@ def download_instrumental(request: Request, job_id: str):
     abs_path = os.path.join(BASE_DIR, ipath.lstrip("/"))
     return FileResponse(abs_path, media_type="audio/mpeg" if has_ffmpeg else "audio/wav", filename=f"instrumental_{job['filename']}")
 
+# API: GET /download/synthesizer/{job}
+@app.get("/download/synthesizer/{job_id}")
+def download_synthesizer(request: Request, job_id: str):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    job = jobs.get(job_id)
+    if not job or job.get("user_id") != user_id or job["status"] != "finished":
+        raise HTTPException(status_code=404, detail="Synthesizer file not found or separation not completed.")
+    spath = job["stems"].get("synthesizer")
+    if not spath:
+        raise HTTPException(status_code=404, detail="Synthesizer stem not found for this separation job.")
+    abs_path = os.path.join(BASE_DIR, spath.lstrip("/"))
+    return FileResponse(abs_path, media_type="audio/mpeg" if has_ffmpeg else "audio/wav", filename=f"synthesizer_{job['filename']}")
+
+# API: GET /download/{stem_name}/{job} (Generalized Single-Stem Downloader)
+@app.get("/download/{stem_name}/{job_id}")
+def download_any_stem(request: Request, stem_name: str, job_id: str):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
+    job = jobs.get(job_id)
+    if not job or job.get("user_id") != user_id or job["status"] != "finished":
+        raise HTTPException(status_code=404, detail="Job not found or separation not completed.")
+        
+    spath = job["stems"].get(stem_name)
+    if not spath:
+        raise HTTPException(status_code=404, detail=f"Stem '{stem_name}' not found for this separation job.")
+    abs_path = os.path.join(BASE_DIR, spath.lstrip("/"))
+    return FileResponse(abs_path, media_type="audio/mpeg" if has_ffmpeg else "audio/wav", filename=f"{stem_name}_{job['filename']}")
+
 # API: GET /download/all/{job} (ZIP)
 @app.get("/download/all/{job_id}")
 def download_all_zip(request: Request, job_id: str):
@@ -839,15 +924,8 @@ def download_all_zip(request: Request, job_id: str):
     
     # Recreate ZIP if missing
     if not os.path.exists(zip_path):
-        model_name = job.get("model", "htdemucs")
-        if job.get("mode") == "6stems":
-            model_name = "htdemucs_6s"
-        stems_folder = os.path.join(job_out_dir, model_name, "original")
-        if not os.path.exists(stems_folder):
-            stems_folder = job_out_dir
-        
         files_to_zip = []
-        for root, _, files in os.walk(stems_folder):
+        for root, _, files in os.walk(job_out_dir):
             for file in files:
                 if file.endswith((".mp3", ".wav")) and not file.startswith("separated_stems_"):
                     files_to_zip.append(os.path.join(root, file))

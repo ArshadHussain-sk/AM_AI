@@ -59,9 +59,16 @@ def init_db():
             other TEXT,
             guitar TEXT,
             piano TEXT,
+            synthesizer TEXT,
             FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
         )
     """)
+    
+    # Check if synthesizer column exists in existing database (Migration)
+    cursor.execute("PRAGMA table_info(stems)")
+    existing_cols = [row["name"] for row in cursor.fetchall()]
+    if "synthesizer" not in existing_cols:
+        cursor.execute("ALTER TABLE stems ADD COLUMN synthesizer TEXT")
     
     conn.commit()
     conn.close()
@@ -157,7 +164,7 @@ def save_job_stems(job_id: str, stems_dict: dict):
     cursor.execute("SELECT 1 FROM stems WHERE job_id = ?", (job_id,))
     exists = cursor.fetchone()
     
-    cols = ["vocals", "instrumental", "drums", "bass", "other", "guitar", "piano"]
+    cols = ["vocals", "instrumental", "drums", "bass", "other", "guitar", "piano", "synthesizer"]
     vals = [stems_dict.get(c) for c in cols]
     
     if exists:
